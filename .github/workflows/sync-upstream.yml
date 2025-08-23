@@ -1,0 +1,63 @@
+name: Daily Sync from Upstream
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 每天凌晨2点 UTC 执行
+  workflow_dispatch:     # 手动触发
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write      # 确保有写入权限
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v4  # 使用最新版本
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Set up Git user and config
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config checkout.defaultRemote origin
+
+      - name: Add upstream repository (if not exists)
+        run: |
+          if ! git remote | grep -q "^upstream$"; then
+            git remote add upstream https://github.com/github/gitignore.git
+          fi
+          git fetch upstream main
+
+      - name: Check for changes and merge
+        run: |
+          git checkout main
+          
+          # 检查是否有新的提交
+          LOCAL=$(git rev-parse main)
+          UPSTREAM=$(git rev-parse upstream/main)
+          
+          if [ "$LOCAL" != "$UPSTREAM" ]; then
+            echo "发现上游更新，开始合并..."
+            git merge upstream/main --no-edit
+            echo "CHANGES_DETECTED=true" >> $GITHUB_ENV
+          else
+            echo "上游没有新的更新"
+            echo "CHANGES_DETECTED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Push changes (if any)
+        if: env.CHANGES_DETECTED == 'true'
+        run: |
+          git push origin main
+
+      - name: Summary
+        run: |
+          if [ "$CHANGES_DETECTED" = "true" ]; then
+            echo "✅ 成功同步上游更新"
+          else
+            echo "ℹ️ 已是最新版本，无需更新"
+          fi
